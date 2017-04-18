@@ -10,6 +10,7 @@ from pygame.locals import *
 import getpass
 import ipaddress
 import multiprocessing
+import pickle
 import threading
 import time
 import socket
@@ -36,7 +37,10 @@ def setSpeed(newSpeed):
   interval = 2000 // (1 + ispeed)
   return True
 
-def serverProcessFunction(fns, options):
+def serverProcessFunction(options):
+  #Чтение из файла поля с позициями змеек
+  fns=FieldAndSnakes(open('./fields/foursquares-12x12.field'))
+
   sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
   sock.bind(('',options['port']))
   sock.listen(10)  #TODO: должно зависеть от допустимого числа игроков?
@@ -46,12 +50,16 @@ def serverProcessFunction(fns, options):
     print('SERVER accepted connection from '+str(addr))
     msg = client.recv(1024) #TODO: нормально определить размер
     print('SERVER received message: '+ msg.decode('ascii'))
+    msg = pickle.dumps(fns)
+    client.send(msg)
     client.close()
 
-def drawThreadFunction(fns):
+def drawThreadFunction():
   """
   Потоковая функция прорисовки поля
   """
+  #fns=None
+
   borderWidth = 1
   statAreaH = 6
   statAreaW = 12
@@ -238,20 +246,15 @@ if __name__=='__main__':
   f.write('player name = '+options['player name']+'\n')
   f.close()
 
-  #Чтение из файла поля с позициями змеек
-  fns=FieldAndSnakes(open('./fields/foursquares-12x12.field'))
-  #Присвоение цветов змейкам
-  for s in range(len(fns.snakes)):
-    fns.snakes[s].color=snakeColors[s]
 
   #Запуск сервера
   if isServer:
-    srvProc = multiprocessing.Process(target=serverProcessFunction, args=(fns,options))
+    srvProc = multiprocessing.Process(target=serverProcessFunction, args=(options,))
     srvProc.start()
 
   #Клиентская часть
   try:
-    clientProcessFunction(fns,options)
+    clientProcessFunction(options)
   except Exception as exc:  
     srvProc.terminate()
     srvProc.join()
@@ -266,7 +269,7 @@ if __name__=='__main__':
   exit()
 
   #Запуск потока вывода/ввода
-  drawThread=threading.Thread(target=drawThreadFunction, args=(fns,))
+  drawThread=threading.Thread(target=drawThreadFunction)
   drawThread.start()
 
   #Останов потока вывода/ввода

@@ -97,6 +97,9 @@ class FieldAndSnakes:
   #Удаляем лишних змеек, если есть ограничение через константу
   del self.snakes[maxSnakes:]
   assert len(self.snakes)>=1, 'Found less than 1 snake (only {0})'.format(len(self.snakes))
+  #Присвоение цветов змейкам
+  for s in range(len(self.snakes)):
+    self.snakes[s].color=snakeColors[s]
    
 
   if debugOutput: 
