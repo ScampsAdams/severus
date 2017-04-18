@@ -1,22 +1,25 @@
+"""
+Программа "Змейка" - запускаемый файл
+"""
+from snakecommon import *
+from snakeclient import *
+
 import pygcurse.pygcurse as pygcurse
 import pygame
 from pygame.locals import *
-import random
+import getpass
+import ipaddress
+import multiprocessing
 import threading
 import time
+import socket
 import sys
 
-maxCherries = 3
-cherryDuration = 50
-cherryDurationWarning = 10
-
-speed = 3
-interval = 500
-
-emptySpaceSymbol='.'
-cherrySymbol='q'
-snakeSymbol='0'
-snakeHeadSymbol='@'
+options = {
+  'IP':'10.44.15.13',
+  'port':1003,
+  'player name':getpass.getuser()[:8]
+}
 
 gameOver=False
 
@@ -32,6 +35,18 @@ def setSpeed(newSpeed):
   speed = ispeed
   interval = 2000 // (1 + ispeed)
   return True
+
+def serverProcessFunction(fns, options):
+  sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+  sock.bind(('',options['port']))
+  sock.listen(10)  #TODO: должно зависеть от допустимого числа игроков?
+  print('SERVER listening at port ' +str(options['port']))
+  while True:
+    (client,addr) = sock.accept()
+    print('SERVER accepted connection from '+str(addr))
+    msg = client.recv(1024) #TODO: нормально определить размер
+    print('SERVER received message: '+ msg.decode('ascii'))
+    client.close()
 
 def drawThreadFunction(fns):
   """
@@ -105,21 +120,29 @@ def drawThreadFunction(fns):
           #sys.exit()
           return
         elif event.key == K_a:
-          fns.snakes[0].direction=(-1,0)
+          if fns.snakes[0].direction!=(1,0):
+            fns.snakes[0].direction=(-1,0)
         elif event.key == K_d:
-          fns.snakes[0].direction=(1,0)
+          if fns.snakes[0].direction!=(-1,0):
+            fns.snakes[0].direction=(1,0)
         elif event.key == K_w:
-          fns.snakes[0].direction=(0,-1)
+          if fns.snakes[0].direction!=(0,1):
+            fns.snakes[0].direction=(0,-1)
         elif event.key == K_s:
-          fns.snakes[0].direction=(0,1)
+          if fns.snakes[0].direction!=(0,-1):
+            fns.snakes[0].direction=(0,1)
         elif event.key == K_LEFT:
-          fns.snakes[1].direction=(-1,0)
+          if fns.snakes[1].direction!=(1,0):
+            fns.snakes[1].direction=(-1,0)
         elif event.key == K_RIGHT:
-          fns.snakes[1].direction=(1,0)
+          if fns.snakes[1].direction!=(-1,0):
+            fns.snakes[1].direction=(1,0)
         elif event.key == K_UP:
-          fns.snakes[1].direction=(0,-1)
+          if fns.snakes[1].direction!=(0,1):
+            fns.snakes[1].direction=(0,-1)
         elif event.key == K_DOWN:
-          fns.snakes[1].direction=(0,1)
+          if fns.snakes[1].direction!=(0,-1):
+            fns.snakes[1].direction=(0,1)
         elif event.key == K_KP_PLUS:
           if setSpeed(speed+1):
             speedChanged = True
@@ -143,185 +166,105 @@ def drawThreadFunction(fns):
   #Ожидание нажатия клавиши по окончанию игры
   pygcurse.waitforkeypress()
   
-class Snake:
- """
- Класс Змейка
- """
- def __init__(self):
-   self.dead=False
-
- def determineDirection(self):
-   #Вычисление направления движения (поле объекта)
-   self.direction=(self.coords[0][0]-self.coords[1][0],self.coords[0][1]-self.coords[1][1])
-
-
-class FieldAndSnakes:
- """
- Класс Поле, содержащий информацию о поле, змейках и вишенках
- """
- fieldWidthMin=10
- fieldHeightMin=10
- snakeLengthMin=3
-
- #def fieldFromFile(file):
- def __init__(self, file):
-  """
-  Чтение игрового поля из файла
-  """
-  self.field=list(list(line.strip()) for line in file if len(line.strip())>0)
-  file.close()
-  #Проверка высоты
-  H=len(self.field)
-  assert H>=self.fieldHeightMin, 'Field height too small ({0}<{1})'.format(H,self.fieldHeightMin)
-  #Проверка ширины
-  wd=list(map(len,self.field))
-  minW=min(wd) 
-  maxW=max(wd)
-  assert minW==maxW, 'Inconsistent field width ({0} to {1})'.format(minW,maxW)
-  W=minW
-  assert W>=self.fieldWidthMin, 'Field width too small ({0}<{1})'.format(W,self.fieldWidthMin)
-
-  #Считывание начальных положений змеек
-  self.snakes=[]
-  for headSymbol in ('1', '2'):
-    #Поиск головы
-    for y in range(H):
-      try:
-        x=self.field[y].index(headSymbol)
-      except ValueError:
-        continue
-      #Нашли голову
-      snake=[(x,y)]
-      self.field[y][x]=emptySpaceSymbol
-      while True:
-        neighbors=[]
-        if x-1>=0 and self.field[y][x-1]==snakeSymbol: neighbors.append((x-1,y))
-        if x+1< W and self.field[y][x+1]==snakeSymbol: neighbors.append((x+1,y))
-        if y-1>=0 and self.field[y-1][x]==snakeSymbol: neighbors.append((x,y-1))
-        if y+1< H and self.field[y+1][x]==snakeSymbol: neighbors.append((x,y+1))
-        if len(neighbors)==0: 
-          #Конец змейки
-          break
-        elif len(neighbors)==1:
-          #Продолжение змейки  
-          snake.append(neighbors[0])  #или extend(neighbors)
-          (x,y)=neighbors[0]
-          self.field[y][x]=emptySpaceSymbol
-        else:
-          #Несколько вариантов продолжения - недопустимо
-          assert False, 'Incorrect initial snake position at x={0}, y={1}'.format(x,y)
-          break 
-      assert len(snake)>=self.snakeLengthMin, "Snake '"+headSymbol+"' too short ({0}<{1})".format(len(snake),self.snakeLengthMin)
-      sn=Snake()
-      sn.coords=snake
-      sn.determineDirection()
-      self.snakes.append(sn)
-      print("Snake '"+headSymbol+"' found at ({0}, {1})".format(*snake[0]))
-      break
-    else:
-      print("Snake '"+headSymbol+"' not found")
-
-  assert len(self.snakes)>=2, 'Two snakes not found (just {0})'.format(len(self.snakes))
-   
-
-  print('Field loaded successfully! H={0} W={1}'.format(H, W))  
-  print('{0} snakes'.format(len(self.snakes)))  
-  self.H=H
-  self.W=W
-  for line in self.field: print(*line)
-
-  self.cherries=[]
-  for i in range(maxCherries):
-    self.placeCherry()
-
-
- def placeCherry(self):
-   """
-   Добавление на поле одной вишенки
-   """
-   validPlace=False
-   while not validPlace:
-     validPlace=True
-     x=random.randint(0,self.W-1)
-     y=random.randint(0,self.H-1)
-     #Проверка на совпадение с другой вишенкой
-     if (x,y) in self.cherries:
-       validPlace=False
-       continue
-     #Проверка на препятствие на поле
-     if self.field[y][x] != emptySpaceSymbol:
-       validPlace=False
-       continue
-     #Проверка на змейку
-     for snake in self.snakes:
-       if snake.dead: continue
-       if (x,y) in snake.coords:
-         validPlace=False
-         break
-   self.cherries.append((x,y))
-
- def step(self):
-  """
-  Продвижение на 1 шаг
-  """
-  cherriesEaten=0
-
-  for snake in self.snakes:
-    if snake.dead: continue
-    (newx,newy)=(snake.coords[0][0]+snake.direction[0], snake.coords[0][1]+snake.direction[1])
-
-    if (newx,newy) in snake.coords:
-      #Врезались сами в себя
-      snake.dead=True
-      continue
-    if newx<0 or newx>=self.W or newy<0 or newy>=self.H:
-      #Врезались в стенку
-      snake.dead=True
-      continue
-
-    snake.coords.insert(0,(newx,newy))
-    if (newx,newy) in fns.cherries:
-      #вишенка съедена
-      cherriesEaten+=1
-      self.cherries.remove((newx,newy))
-    elif self.field[newy][newx]==emptySpaceSymbol:
-      #не съедена
-      snake.coords.pop()
-    else:
-      #столкновение с препятствием
-      snake.coords.pop()
-      snake.dead=True
-
-    #Проверка на столкновение с другими
-    for snake2 in self.snakes:
-      if not snake2.dead and snake!=snake2 and (newx,newy) in snake2.coords:
-        snake.dead=True
-        #Проверка на взаимность столкновения: тогда умерли обе!
-        if snake2.coords[0] in snake.coords:
-          snake2.dead=True
-
-  #Подсчёт оставшихся в живых
-  alive=0
-  for snake in self.snakes:
-    if not snake.dead:
-      alive += 1
-  if alive <=1:
-    global gameOver
-    gameOver = True
- 
-
-  # Создание вишенок взамен съеденных
-  for i in range(cherriesEaten):
-    self.placeCherry()
-    
 
 if __name__=='__main__':
+  #Чтение файла с настройками, если таковой существует
+  try:
+    f=open('snake.ini')
+    for line in f:
+      ss = line.split('=')
+      (ss[0],ss[1])=(ss[0].strip(),ss[1].strip())
+      if len(ss)<2: continue
+      if ss[0] == 'ip':
+        options['ip'] = ss[1]
+      elif ss[0] == 'player name':
+        options['player name'] = ss[1]
+      elif ss[0] == 'port':
+        try:
+          options['port'] = int(ss[1])
+        except ValueError:
+          pass
+    f.close()
+  except FileNotFoundError:
+    pass
+
+  isServer=None
+  #Уточнение настроек вручную
+  print("Welcome to Snake alpha!    Developed by da.volkov")
+  #Имя
+  print("Enter player name, 8 symbols max [" + options['player name'] + "]:", end=' ')
+  res=input().strip()[:8]
+  if len(res)>0:
+    options['player name']=res
+  #Сервер
+  res=' '
+  while res not in ('s', 'c'):
+    print('Are you (s)erver or (c)lient?', end=' ')
+    res=input().strip().lower()
+  if res=='s':
+    isServer=True
+  else:
+    isServer=False
+  #IP адрес
+  address=None
+  if not isServer:
+    while address==None:
+      print('Enter server IP [' + options['IP'] + ']', end=' ')
+      res=input().strip().lower()
+      if len(res)==0: 
+        address=ipaddress.ip_address(options['IP'])
+        break
+      try:
+        address=ipaddress.ip_address(res)
+        options['IP']=res
+      except ValueError:
+        pass
+  port=None
+  #Порт
+  while port==None:
+    print('Enter port ['+str(options['port'])+']', end=' ')
+    res=input().strip()
+    if len(res)==0:
+      port=options['port']
+      break
+    try:
+      port=options['port']=int(res)
+    except ValueError:
+      pass
+  #Запись последних введённых значений в файл
+  f=open('snake.ini','w')
+  f.write('IP = '+options['IP']+'\n')
+  f.write('port = '+str(options['port'])+'\n')
+  f.write('player name = '+options['player name']+'\n')
+  f.close()
+
   #Чтение из файла поля с позициями змеек
   fns=FieldAndSnakes(open('./fields/foursquares-12x12.field'))
   #Присвоение цветов змейкам
-  snakeColors=['red','aqua','yellow','lime']
   for s in range(len(fns.snakes)):
     fns.snakes[s].color=snakeColors[s]
+
+  #Запуск сервера
+  if isServer:
+    srvProc = multiprocessing.Process(target=serverProcessFunction, args=(fns,options))
+    srvProc.start()
+
+  #Клиентская часть
+  try:
+    clientProcessFunction(fns,options)
+  except Exception as exc:  
+    srvProc.terminate()
+    srvProc.join()
+    raise exc
+    exit()
+
+  #Завершение работы
+  print("Press any key to close")
+  input()
+  srvProc.terminate()
+  srvProc.join()
+  exit()
+
   #Запуск потока вывода/ввода
   drawThread=threading.Thread(target=drawThreadFunction, args=(fns,))
   drawThread.start()
