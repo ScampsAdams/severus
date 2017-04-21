@@ -3,22 +3,22 @@
 """
 import random
 
+PACKET_END=b'\n\n'
+
 maxCherries = 3
 cherryDuration = 50 #не используется
 cherryDurationWarning = 10 #не используется
 
-speed = 3
-interval = 500
-
 fieldWidthMin=10
 fieldHeightMin=10
+fieldWidthMax=30
+fieldHeightMax=30
 snakeLengthMin=3
 emptySpaceSymbol='.'
 cherrySymbol='q'
 snakeSymbol='0'
 snakeHeadSymbol='@'
-snakeColors=['red','aqua','yellow','lime']
-maxSnakes=1
+snakeColors=['red','aqua','yellow','lime','red','aqua','yellow','lime','red'] #TODO: diff colors!
 
 class Snake:
  """
@@ -35,7 +35,9 @@ class Snake:
 class FieldAndSnakes:
  """
  Класс Поле, содержащий информацию о поле, змейках и вишенках
+ до кучи, засунули сюда же скорость и сообщение игрокам
  """
+
 
  #def fieldFromFile(file):
  def __init__(self, file, debugOutput=False):
@@ -47,6 +49,7 @@ class FieldAndSnakes:
   #Проверка высоты
   H=len(self.field)
   assert H>=fieldHeightMin, 'Field height too small ({0}<{1})'.format(H,fieldHeightMin)
+  assert H<=fieldHeightMax, 'Field height too large ({0}>{1})'.format(H,fieldHeightMax)
   #Проверка ширины
   wd=list(map(len,self.field))
   minW=min(wd) 
@@ -54,6 +57,7 @@ class FieldAndSnakes:
   assert minW==maxW, 'Inconsistent field width ({0} to {1})'.format(minW,maxW)
   W=minW
   assert W>=fieldWidthMin, 'Field width too small ({0}<{1})'.format(W,fieldWidthMin)
+  assert W<=fieldWidthMax, 'Field width too large ({0}>{1})'.format(W,fieldWidthMax)
 
   #Считывание начальных положений змеек
   self.snakes=[]
@@ -94,9 +98,10 @@ class FieldAndSnakes:
       break
     else:
       if debugOutput: print("Snake '"+headSymbol+"' not found")
+
   #Удаляем лишних змеек, если есть ограничение через константу
-  del self.snakes[maxSnakes:]
-  assert len(self.snakes)>=1, 'Found less than 1 snake (only {0})'.format(len(self.snakes))
+  #del self.snakes[maxSnakes:]
+  assert len(self.snakes)>0, 'Did not find snakes!'
   #Присвоение цветов змейкам
   for s in range(len(self.snakes)):
     self.snakes[s].color=snakeColors[s]
@@ -160,7 +165,7 @@ class FieldAndSnakes:
       continue
 
     snake.coords.insert(0,(newx,newy))
-    if (newx,newy) in fns.cherries:
+    if (newx,newy) in self.cherries:
       #вишенка съедена
       cherriesEaten+=1
       self.cherries.remove((newx,newy))
@@ -185,12 +190,9 @@ class FieldAndSnakes:
   for snake in self.snakes:
     if not snake.dead:
       alive += 1
-  if alive <1:   
-    global gameOver
-    gameOver = True
- 
 
   # Создание вишенок взамен съеденных
   for i in range(cherriesEaten):
     self.placeCherry()
     
+  return bool(alive < 1) #gameOver
