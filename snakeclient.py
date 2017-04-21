@@ -10,32 +10,38 @@ import pickle
 import socket
 import sys
 import time
-import pygcurse.pygcurse as pygcurse
+import lib.pygcurse.pygcurse as pygcurse
 import pygame
 from pygame.locals import *
 
 def clientProcessFunction(options):
 
-  fieldAreaX=1
-  fieldAreaY=1
-  fieldH = fieldHeightMax+2
-  fieldW = fieldWidthMax+2
-  playersAreaW = 13
-  playersAreaX = fieldW
-  playersAreaY = 1
+  fieldAreaX = 1
+  fieldAreaY = 1
+  fieldAreaH = fieldHeightMax + 2
+  fieldAreaW = fieldWidthMax + 2
+  playersAreaW = 5 + PLAYER_NAME_MAX_LEN + 2
+  playersAreaH = MAX_PLAYERS + 2
+  playersAreaX = fieldAreaW
+  playersAreaY = 0
+  browserAreaW = playersAreaW
+  browserAreaH = max(8, fieldAreaH-playersAreaH)
+  browserAreaX = fieldAreaW
+  browserAreaY = playersAreaH
   statAreaH = 3
-  statAreaW = 12
-  statAreaX = 1
-  statAreaY = fieldH
-  windowW = fieldW + playersAreaW
-  windowH = fieldH + statAreaH
+  statAreaW = fieldAreaW + playersAreaW
+  statAreaX = 0
+  statAreaY = max(fieldAreaH, playersAreaH + browserAreaH)
+  windowW = fieldAreaW + playersAreaW
+  windowH = max(fieldAreaH, playersAreaH + browserAreaH) + statAreaH
 
   gameOver=False
   fns=None
   players=None
   message=''
+  browser=None
 
-  def draw(drawBorder=False, drawFns=False, drawPlayers=False, drawMessage=False):
+  def draw(drawBorder=False, drawFns=False, drawPlayers=False, drawMessage=False, drawBrowser=False):
     """
     Рисование всего
     """
@@ -43,24 +49,36 @@ def clientProcessFunction(options):
     win.fgcolor = 'gray'
     #Вывод списка игроков
     if drawPlayers and players:
-      #TODO: сортировка игроков, пока криво
+      #playersList=list(players)
+      win.fill(' ', region=(playersAreaX, playersAreaY, playersAreaW, playersAreaH))
       p=0
       for player in players:
-        string = 'X' if fns.snakes[p].dead else ('+' if players[player].ready else ' ')
-        string += '*' if players[player].isAdmin else ' '
-        string += str(p+1) + ' ' + player
-        win.putchars(string, x=playersAreaX, y=playersAreaY+p, fgcolor=snakeColors[p])
+        if p<len(fns.snakes):
+          string = 'X' if fns.snakes[p].dead else ('+' if players[player].ready else ' ')
+          string += ' *' if players[player].isAdmin else '  '
+          string += str(p+1) + ' ' + player
+          win.putchars(string, x=playersAreaX+1, y=playersAreaY+1+p, fgcolor=snakeColors[p])
+        else:
+          string = 'spec '+ player
+          win.putchars(string, x=playersAreaX+1, y=playersAreaY+1+p, fgcolor='gray')
         p += 1
       for p in range(len(players),len(fns.snakes)):
-        string = '  ' +str(p+1)+'<waiting>'
-        win.putchars(string, x=playersAreaX, y=playersAreaY+p, fgcolor=snakeColors[p])
+        string = '   ' +str(p+1)+' <waiting>'
+        win.putchars(string, x=playersAreaX+1, y=playersAreaY+1+p, fgcolor=snakeColors[p])
     #Вывод сообщения
     if drawMessage:
-      win.fill(' ', region=(statAreaX, statAreaY, windowW, statAreaH)) #statAreaW
-      win.putchars(message, x=(windowW-len(message))//2, y=statAreaY+statAreaH//2, fgcolor='white') 
+      win.fill(' ', region=(statAreaX, statAreaY, statAreaW, statAreaH))
+      win.putchars(message, x=statAreaX+(statAreaW-len(message))//2, y=statAreaY+1, fgcolor='white') 
+    #Вывод списка полей
+    if drawBrowser and browser:
+      win.fill(' ', region=(browserAreaX, browserAreaY, browserAreaW, browserAreaH))
+      for i in range( min( len(browser.files), browserAreaH ) ):
+        string = '>' if browser.selected==i else ' '
+        string += browser.files[i].replace('.field','') 
+        win.putchars(string, x=browserAreaX+1, y=browserAreaY+i, fgcolor='white')         
     #Рисование границ поля
     if drawBorder:
-      win.fill('X', region=(0,0,fieldW, fieldH))
+      win.fill('X', region=(0,0,fieldAreaW, fieldAreaH))
     #Рисование поля
     if drawFns and fns:
       for y in range(fns.H):
@@ -101,22 +119,31 @@ def clientProcessFunction(options):
   первый - для записи,  второй - для чтения.
   Каждый отправляет свой режим работы и имя игрока
   """
+  print('CLIENT '+cname+' connecting to ip {0}, port {1} ...'.format(options['ip'],options['port'])) 
   sockRecv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
   try:
-    sockRecv.connect((options['IP'],options['port']))
+    sockRecv.connect((options['ip'],options['port']))
   except ConnectionRefusedError:
     print('Connection refused by server')
-    sockSend.close()
     return
+  except TimeoutError:
+    print(' ! Connection timeout. Check address and port and retry.')
+    return 
+    
   msg=pickle.dumps(('RECV',cname))  #+PACKET_END  на авось :)
   sockRecv.send(msg) 
 
   sockSend = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
   try:
-    sockSend.connect((options['IP'],options['port']))
+    sockSend.connect((options['ip'],options['port']))
   except ConnectionRefusedError:
-    print('Connection refused by server')
+    print(' ! Connection refused by server')
+    sockRecv.close()
     return
+  except TimeoutError:
+    print(' ! Connection timeout. Check address and port and retry.')
+    sockRecv.close()
+    return 
   msg=pickle.dumps(('SEND',cname))  #+PACKET_END  на авось :)
   sockSend.send(msg) 
 
@@ -141,6 +168,7 @@ def clientProcessFunction(options):
    nonlocal fns
    nonlocal players
    nonlocal message
+   nonlocal browser
 
    buffer=b''
    while not gameOver:
@@ -159,7 +187,7 @@ def clientProcessFunction(options):
        if data[0]=='FNS':
          fns=data[1]
          #print('CLIENT '+cname+' received FNS data')
-         draw(drawFns=True)
+         draw(drawFns=True, drawPlayers=True)
        elif data[0]=='PLAYERS':
          #print('CLIENT '+cname+' received PLAYERS data')
          players=data[1]
@@ -169,8 +197,12 @@ def clientProcessFunction(options):
          message=data[1]
          draw(drawMessage=True)
        elif data[0]=='GG':
+         #print('CLIENT '+cname+' received GG')
          gameOver=True
-
+       elif data[0]=='BROWSER':
+         #print('CLIENT '+cname+' received MESSAGE '+data[1])
+         browser=data[1]
+         draw(drawBorder=True, drawFns=True, drawBrowser=True)
        buffer=buffer[index+len(PACKET_END):]
        index=buffer.find(PACKET_END)
      # end of while index>=0 #
@@ -190,6 +222,8 @@ def clientProcessFunction(options):
   while not gameOver:
     time.sleep(0.1)
     for event in pygame.event.get():
+      if gameOver:
+        break
       if event.type == QUIT:
         gameOver=True #Избыточно
         send('DISCONNECT','')
@@ -221,6 +255,7 @@ def clientProcessFunction(options):
   print("CLIENT " + cname + " closing")
   sockRecv.close()
   send('DISCONNECT','')
+  #print("CLIENT " + cname + " closing")
   sockSend.close()
   #Игнорирование оставшихся событий 
   for event in pygame.event.get():

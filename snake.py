@@ -10,6 +10,7 @@ import getpass
 import ipaddress
 import multiprocessing
 import os
+import os.path
 import pickle
 import threading
 import time
@@ -17,9 +18,9 @@ import socket
 import sys
 
 options = {
-  'IP':'10.44.15.13',
-  'port':1003,
-  'player name':getpass.getuser()[:8]
+  'ip':'10.44.15.25',
+  'port':2001,
+  'player name':getpass.getuser()[:PLAYER_NAME_MAX_LEN]
 }
 
 gameStart=False
@@ -28,6 +29,8 @@ speed = 3
 interval = 500
 maxPlayers = 9
 fns=None
+browser=None
+lock = threading.Lock() #вроде, и не требуется
 
 def setSpeed(newSpeed):
   """
@@ -54,6 +57,29 @@ class PlayerData:
   self.ready = False
   self.isAdmin = False
 pd={}
+
+class FieldBrowser:
+  def __init__(self,directory):
+    self.directory=directory
+    #print (str(os.listdir(directory)))
+    self.files=[ f for f in os.listdir(directory) if f.endswith('.field') ]  
+    # and os.path.isfile(f) почему-то не работает
+    assert len(self.files)>0, 'В каталоге '+directory+' не найдены файлы *.field'
+    self.selected=0
+
+  def select(self, newindex):
+    l = len(self.files)
+    if newindex<0:
+      self.selected = newindex + l
+    elif newindex >= l:
+      self.selected = newindex - l
+    else:
+      self.selected = newindex
+    return self.selected != newindex
+    #print('selected '+str(self.selected))
+
+  def getSelected(self):
+    return os.path.join(self.directory, self.files[self.selected])
 
 def sendPlayerData(player=None):
   """
@@ -110,14 +136,30 @@ def sendFnsData(fns, player=None):
       pd[p].socketSend.send(msg)
 
 
+def sendBrowserData(b, player=None):
+  """
+  Рассылка клиентам списка карт
+  """
+  msg=pickle.dumps(('BROWSER', b))+PACKET_END
+
+  if player:  #если задан получатель, то только ему
+    if pd[player].socketSend != None:
+      pd[player].socketSend.send(msg)
+    return
+
+  for p in pd:  #иначе всем
+    if pd[p].socketSend != None:
+      pd[p].socketSend.send(msg)
+
+
 def serverThreadFunction( pname ):
   """
-  Обработка файлов от клиентов
-  isAdmin: клиент - администратор и имеет дополнительные права
+  Обработка сообщений от одного клиента
   """
   sock = pd[pname].socketRecv
   sock.settimeout(1)
   buffer=b''
+  global fns
   while not gameOver:
     try:
      #print('SERVER reading data from {0}'.format(pname))
@@ -144,28 +186,68 @@ def serverThreadFunction( pname ):
         print('SERVER: {0} players remaining'.format(len(pd)) )
         return
       elif data[0]=='READY':
-        pd[pname].ready=True
-        sendPlayerData()
+        if not gameStart:
+          pd[pname].ready=True
+          sendPlayerData()
         continue
       elif data[0]=='direction':
-        if not gameStart: continue
-        if pd[pname].number < len(fns.snakes):
-          if data[1]=='L':
-            if fns.snakes[pd[pname].number].direction != (1,0):
-              fns.snakes[pd[pname].number].direction=(-1,0)
-          elif data[1]=='R':
-            if fns.snakes[pd[pname].number].direction != (-1,0):
-              fns.snakes[pd[pname].number].direction=(1,0)
-          elif data[1]=='U':
-            if fns.snakes[pd[pname].number].direction != (0,1):
-              fns.snakes[pd[pname].number].direction=(0,-1)
-          elif data[1]=='D':
-            if fns.snakes[pd[pname].number].direction != (0,-1):
-              fns.snakes[pd[pname].number].direction=(0,1)
+        if not gameStart:  #до начала игры 
+          if data[1]=='U' and pd[pname].isAdmin:
+            browser.select(browser.selected-1)
+            filename=browser.getSelected()
+            try:
+              tmp=FieldAndSnakes(open( filename ))
+            except AssertionError as exc:
+              print('Error when loading file '+ filename)
+              print(str(exc))
+              continue
+            fns=tmp
+            sendFnsData(fns)
+            sendBrowserData(browser)
+            for player in pd:
+              pd[player].ready=False
+            sendPlayerData()
+          elif data[1]=='D' and pd[pname].isAdmin:
+            browser.select(browser.selected+1)
+            filename=browser.getSelected()
+            try:
+              tmp=FieldAndSnakes(open( filename ))
+            except AssertionError as exc:
+              print('Error when loading file '+ filename)
+              print(str(exc))
+              continue
+            fns=tmp
+            sendFnsData(fns)
+            sendBrowserData(browser)
+            for player in pd:
+              pd[player].ready=False
+            sendPlayerData()
+        else: #в процессе игры
+          if pd[pname].number < len(fns.snakes):
+            if data[1]=='L':
+              if fns.snakes[pd[pname].number].direction != (1,0):
+                #lock.acquire()
+                fns.snakes[pd[pname].number].directionNew=(-1,0)
+                #lock.release()
+            elif data[1]=='R':
+              if fns.snakes[pd[pname].number].direction != (-1,0):
+                #lock.acquire()
+                fns.snakes[pd[pname].number].directionNew=(1,0)
+                #lock.release()
+            elif data[1]=='U':
+              if fns.snakes[pd[pname].number].direction != (0,1):
+                #lock.acquire()
+                fns.snakes[pd[pname].number].directionNew=(0,-1)
+                #lock.release()
+            elif data[1]=='D':
+              if fns.snakes[pd[pname].number].direction != (0,-1):
+                #lock.acquire()
+                fns.snakes[pd[pname].number].directionNew=(0,1)
+                #lock.release()
       elif data[0]=='speed' and pd[pname].isAdmin:
         if not gameStart: continue
         if setSpeed(speed+data[1]):
-          sendMessage('SPEED '+str(speed))
+          sendMessage('СКОРОСТЬ '+str(speed))
      # end while index>0
     except ConnectionResetError:
       del pd[pname]
@@ -185,9 +267,11 @@ def serverProcessFunction(options):
   """
   Процесс сервера: ожидание подключений
   """
+  global browser 
+  browser=FieldBrowser('fields')
   #Чтение из файла поля с позициями змеек
   global fns
-  fns=FieldAndSnakes(open('./fields/foursquares-12x12.field'))
+  fns=FieldAndSnakes(open( browser.getSelected() ))
 
   admin = options['player name']
 
@@ -205,7 +289,8 @@ def serverProcessFunction(options):
 
    global gameStart
    global pd
-   message="нажмите ПРОБЕЛ для подтверждения готовности"
+   messageSrv="ПРОБЕЛ для начала игры"
+   messageCli="ожидайте начала игры"
    while True:
     #time.sleep(0.1)
     #try:
@@ -249,7 +334,11 @@ def serverProcessFunction(options):
       
       time.sleep(0.5)
       sendFnsData(fns, pname)
-      sendMessage(message,pname)
+      if pname== admin:
+        sendMessage(messageSrv, pname)
+      else:
+        sendMessage(messageCli, pname)
+      sendBrowserData(browser, pname)
       sendPlayerData()
       print('SERVER: player '+pname+' joined')
       #thr.daemon = True
@@ -274,32 +363,51 @@ def serverProcessFunction(options):
   thrAcc.start()
 
   global gameStart
-  print('SERVER: waiting for start '+admin)
+  print('SERVER: waiting for start...')
   while not gameStart:
     time.sleep(1)
-    gameStart = pd[admin].ready
-    if len(pd)==0:
-      print('SERVER: closing, all players disconnected')
-      return
+    # Одной секунды бывает мало, чтобы прошло подключение даже своего клиента...
+    # Таймаут большой.
+    if admin in pd:
+      gameStart = pd[admin].ready
+    #if len(pd)==0:
+    #  print('SERVER: closing, all players disconnected')
+    #  return
 
   #Окончательное присвоение змеек игрокам
   p = 0
   for player in pd:
     pd[player].number=p
     p += 1
+    pd[player].ready=False
   del fns.snakes[p:]
-    
+  #Размещение вишинок на поле
+  for i in range(maxCherries):
+    fns.placeCherry()
+  sendFnsData(fns)
+  sendPlayerData()
+
   print('SERVER: game started with {0} players'.format(len(pd)))
+
+  sendMessage('--- 3 ---')
+  time.sleep(1)
+  sendMessage('-- 2 --')
+  time.sleep(1)
+  sendMessage('- 1 -')
+  time.sleep(1)
+
 
   global speed
   global interval
   setSpeed(3)
-  sendMessage('SPEED '+str(speed))
+  sendMessage('СКОРОСТЬ '+str(speed))
   #Основной цикл
   global gameOver
   while not gameOver:
     time.sleep(interval*0.001)
+    lock.acquire()
     gameOver = fns.step()
+    lock.release()
     sendFnsData(fns)
     if len(pd)==0:
       print('SERVER: closing, all players disconnected')
@@ -308,12 +416,13 @@ def serverProcessFunction(options):
 
   #КОНЕЦ ИГРЫ
   sendMessage('GAME OVER')
-  print('SERVER: game ended')
-  msg=pickle.dumps(('GG',None))
+  msg=pickle.dumps(('GG',None))+PACKET_END
   for player in pd:
     if pd[player].socketSend != None:
       pd[player].socketSend.send(msg)
-  print('SERVER: about to close')
+
+  time.sleep(1) #Чтобы сообщение успело дойти
+  print('SERVER: game ended, exiting')
   return
 #################################
 # end ofserverProcessFunction() #
@@ -344,8 +453,8 @@ if __name__=='__main__':
   #Уточнение настроек вручную
   print("Welcome to Snake alpha!    Developed by da.volkov")
   #Имя
-  print("Enter player name, 8 symbols max [" + options['player name'] + "]:", end=' ')
-  res=input().strip()[:8]
+  print("Enter player name, {0} symbols max [{1}]:".format(PLAYER_NAME_MAX_LEN, options['player name']), end=' ')
+  res=input().strip()[:PLAYER_NAME_MAX_LEN]
   if len(res)>0:
     options['player name']=res
   #Сервер
@@ -359,18 +468,17 @@ if __name__=='__main__':
     isServer=False
   #IP адрес
   address=None
-  if not isServer:
-    while address==None:
-      print('Enter server IP [' + options['IP'] + ']', end=' ')
-      res=input().strip().lower()
-      if len(res)==0: 
-        address=ipaddress.ip_address(options['IP'])
-        break
-      try:
-        address=ipaddress.ip_address(res)
-        options['IP']=res
-      except ValueError:
-        pass
+  while address==None:
+    print('Enter server IP [' + options['ip'] + ']', end=' ')
+    res=input().strip().lower()
+    if len(res)==0: 
+      address=ipaddress.ip_address(options['ip'])
+      break
+    try:
+      address=ipaddress.ip_address(res)
+      options['ip']=res
+    except ValueError:
+      pass
   port=None
   #Порт
   while port==None:
@@ -385,7 +493,7 @@ if __name__=='__main__':
       pass
   #Запись последних введённых значений в файл
   f=open('snake.ini','w')
-  f.write('IP = '+options['IP']+'\n')
+  f.write('ip = '+options['ip']+'\n')
   f.write('port = '+str(options['port'])+'\n')
   f.write('player name = '+options['player name']+'\n')
   f.close()
@@ -399,21 +507,10 @@ if __name__=='__main__':
 
   #Клиентская часть
   clientProcessFunction(options)
-  print("Client closed")
-  """
-  #try:
-  #  clientProcessFunction(options)
-  #except Exception as exc:  
-  #  if isServer:
-  #    print("Exception on client, termniating server")
-  #    srvProc.terminate()
-  #    srvProc.join()
-  #  raise exc
-  #  exit()
-  """
 
   if isServer:
-    print("Client closed, termniating server")
+    #В обычном случае избыточно
+    print("Local client closed, termniating server")
     srvProc.terminate()
     srvProc.join()
   exit()

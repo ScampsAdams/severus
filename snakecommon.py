@@ -5,20 +5,23 @@ import random
 
 PACKET_END=b'\n\n'
 
+MAX_PLAYERS=9
+PLAYER_NAME_MAX_LEN=12
+
 maxCherries = 3
 cherryDuration = 50 #не используется
 cherryDurationWarning = 10 #не используется
 
 fieldWidthMin=10
 fieldHeightMin=10
-fieldWidthMax=30
-fieldHeightMax=30
+fieldWidthMax=32
+fieldHeightMax=32
 snakeLengthMin=3
 emptySpaceSymbol='.'
 cherrySymbol='q'
 snakeSymbol='0'
 snakeHeadSymbol='@'
-snakeColors=['red','aqua','yellow','lime','red','aqua','yellow','lime','red'] #TODO: diff colors!
+snakeColors=['red','blue','lime','silver','aqua','fuchsia','yellow','olive','teal']
 
 class Snake:
  """
@@ -26,6 +29,7 @@ class Snake:
  """
  def __init__(self):
    self.dead=False
+   self.directionNew=None
 
  def determineDirection(self):
    #Вычисление направления движения (поле объекта)
@@ -114,10 +118,7 @@ class FieldAndSnakes:
       print(*line)
   self.H=H
   self.W=W
-
   self.cherries=[]
-  for i in range(maxCherries):
-    self.placeCherry()
 
 
  def placeCherry(self):
@@ -149,10 +150,11 @@ class FieldAndSnakes:
   """
   Продвижение на 1 шаг
   """
-  cherriesEaten=0
-
   for snake in self.snakes:
     if snake.dead: continue
+    if snake.directionNew:
+      snake.direction = snake.directionNew
+      snake.directionNew = None
     (newx,newy)=(snake.coords[0][0]+snake.direction[0], snake.coords[0][1]+snake.direction[1])
 
     if (newx,newy) in snake.coords:
@@ -167,7 +169,6 @@ class FieldAndSnakes:
     snake.coords.insert(0,(newx,newy))
     if (newx,newy) in self.cherries:
       #вишенка съедена
-      cherriesEaten+=1
       self.cherries.remove((newx,newy))
     elif self.field[newy][newx]==emptySpaceSymbol:
       #не съедена
@@ -192,7 +193,7 @@ class FieldAndSnakes:
       alive += 1
 
   # Создание вишенок взамен съеденных
-  for i in range(cherriesEaten):
+  for i in range(maxCherries-len(self.cherries)):
     self.placeCherry()
     
   return bool(alive < 1) #gameOver
