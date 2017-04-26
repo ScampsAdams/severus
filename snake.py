@@ -167,7 +167,8 @@ def serverThreadFunction( pname ):
      #print('SERVER received {0} bytes from {1}'.format(len(block),pname))
      if not block:
        del pd[pname]
-       print('SERVER: player {0} disconnected * (socket {1})'.format(pname, sock))
+       SendPlayerData()
+       print('SERVER: player {0} disconnected * (socket {1})'.format(pname, sock.raddr))
        print('SERVER: {0} players remaining'.format(len(pd)) )
        return
      buffer += block
@@ -182,7 +183,8 @@ def serverThreadFunction( pname ):
       data=pickle.loads(msg) 
       if data[0]=='DISCONNECT':
         del pd[pname]
-        print('SERVER: player {0} disconnected ** (socket {1})'.format(pname, sock))
+        sendPlayerData()
+        print('SERVER: player {0} disconnected ** (socket {1})'.format(pname, sock.raddr))
         print('SERVER: {0} players remaining'.format(len(pd)) )
         return
       elif data[0]=='READY':
@@ -251,7 +253,8 @@ def serverThreadFunction( pname ):
      # end while index>0
     except ConnectionResetError:
       del pd[pname]
-      print('SERVER: player {0} disconnected *** (socket {1})'.format(pname, sock))
+      sendPlayerData()
+      print('SERVER: player {0} disconnected *** (socket {1})'.format(pname, sock.raddr))
       print('SERVER: {0} players remaining'.format(len(pd)) )
       return
     except socket.timeout as exc:
@@ -300,10 +303,15 @@ def serverProcessFunction(options):
     #print('SERVER: received '+str(len(msg))+' bytes from '+str(addr))
     (mode,pname)=pickle.loads(msg)
     
-    if mode=='RECV':
-      #Это первое ожидаемое соединение от игрока.
-      if pname in pd:
-        #Если есть соединение с таким именем игрока - закрываем
+  
+    if mode=='RECV': #Это первое ожидаемое соединение от игрока.
+      if pname in pd: #Если есть соединение с таким именем игрока
+        # Кроме ситуации, если админ
+        if pname==admin:
+          #msg=pickle.dumps(('KICK','Admin already connected'))+PACKET_END
+          client.close() 
+          continue
+        # Закрываем сокеты
         if pd[pname].socketRecv: pd[pname].socketRecv.close()
         if pd[pname].socketSend: pd[pname].socketSend.close()
         #и очищаем информацию по игроку в словаре
@@ -314,6 +322,7 @@ def serverProcessFunction(options):
           pass
       if len(pd)>=maxPlayers:
         #Слишком много игроков
+        #msg=pickle.dumps(('KICK','Too many players'))+PACKET_END
         client.close()
         continue
       pd[pname]=PlayerData()
@@ -329,6 +338,7 @@ def serverProcessFunction(options):
       pd[pname].socketRecv=client
       pd[pname].ready=False
       thr=threading.Thread(target=serverThreadFunction, args=(pname,))
+      thr.daemon=True #И без этого закрывается в 90% случаев :)
       thr.start()
       pd[pname].thread=thr
       
@@ -399,7 +409,7 @@ def serverProcessFunction(options):
 
   global speed
   global interval
-  setSpeed(3)
+  setSpeed(1) ### 3
   sendMessage('СКОРОСТЬ '+str(speed))
   #Основной цикл
   global gameOver

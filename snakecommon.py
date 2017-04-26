@@ -14,8 +14,8 @@ cherryDurationWarning = 10 #не используется
 
 fieldWidthMin=10
 fieldHeightMin=10
-fieldWidthMax=32
-fieldHeightMax=32
+fieldWidthMax=22
+fieldHeightMax=22
 snakeLengthMin=3
 emptySpaceSymbol='.'
 cherrySymbol='q'

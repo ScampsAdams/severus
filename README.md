@@ -1,9 +1,22 @@
-Snake project, codename 'Severus'
-started 14.04 17:37 after a game of billiards
+Игра "Змейка", автор Д. Волков  14.04.2017-20.04.2017
 
-TODO: 
- - singleplayer
- - multiplayer
- - everything else
 
-Note1: waitforkeypress() triggers on KEYUP, not KEYDOWN
+ЗАВИСИМОСТИ
+ 
+Игра требует библиотеку pygame. Данная библиотека требует версию Python не ниже 3.4 и pip.
+Библиотека для Python 3.6 лежит в подкаталоге lib. Для других версий можно скачать по ссылке https://pypi.python.org/pypi/Pygame/1.9.3
+Установка: pip.exe install <файл.whl>
+
+Также игра требует модуль pygcurce, он уже лежит в каталоге lib/pygcurse.
+
+
+УПРАВЛЕНИЕ
+
+Если вы - сервер, выбор карты стрелками вверх/вниз
+Для начала игры - пробел (если вы - сервер)
+Управление змейкой - WASD или стрелки
+Выход - Alt-F4
+
+
+Сообщения об ошибках принимаю через Skype или Inside.
+Спасибо за тестирование!
